@@ -1,5 +1,4 @@
-name: One-Click Build & Publish APK (subfolder)
-
+name: One-Click Build & Publish APK (subfolder, hardened)
 on:
   workflow_dispatch:
 
@@ -9,6 +8,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Print repo tree (top)
+        run: |
+          echo "== repo root =="
+          pwd
+          ls -la
+          echo "== list subdir =="
+          ls -la YIDOSTEEL-v11.2-android || true
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -24,19 +31,36 @@ jobs:
           yes | sdkmanager --licenses
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Bootstrap Gradle wrapper (if missing)
+      - name: Ensure Gradle wrapper (and fallback)
         working-directory: YIDOSTEEL-v11.2-android
         run: |
+          if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
+            echo "ERROR: settings.gradle(.kts) not found in YIDOSTEEL-v11.2-android"; exit 1
+          fi
+
           if [ ! -f ./gradlew ]; then
+            echo "No gradlew found. Bootstrapping wrapper..."
             wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O gradle.zip
             unzip -q gradle.zip -d gradle8 && rm gradle.zip
             gradle8/gradle-8.7/bin/gradle wrapper
           fi
           chmod +x ./gradlew
+          ./gradlew --version || true
 
-      - name: Assemble Debug APK
+      - name: Assemble Debug APK (with fallback if wrapper fails)
         working-directory: YIDOSTEEL-v11.2-android
-        run: ./gradlew --no-daemon assembleDebug
+        run: |
+          set -e
+          if ./gradlew --no-daemon -v >/dev/null 2>&1; then
+            ./gradlew --no-daemon assembleDebug
+          else
+            echo "Wrapper failed, using downloaded Gradle..."
+            gradle8/gradle-8.7/bin/gradle assembleDebug
+          fi
+
+      - name: Show outputs
+        run: |
+          ls -la YIDOSTEEL-v11.2-android/app/build/outputs/apk/debug || true
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
